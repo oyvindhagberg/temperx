@@ -6,6 +6,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/zserge/hid"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -27,6 +29,7 @@ var (
 	ho      float64
 	conf    string
 	verbose bool
+	posturl string
 )
 
 func main() {
@@ -35,12 +38,12 @@ func main() {
 	rootCmd.Flags().Float64Var(&hf, "hf", 1, "Factor for humidity")
 	rootCmd.Flags().Float64Var(&ho, "ho", 0, "Offset for humidity")
 	rootCmd.Flags().StringVarP(&conf, "conf", "c", home+"/.temperx.toml", "Configuration file")
+	rootCmd.Flags().StringVarP(&posturl, "posturl", "u", "", "URL to http post the result")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	viper.BindPFlag("tf", rootCmd.Flags().Lookup("tf"))
 	viper.BindPFlag("to", rootCmd.Flags().Lookup("to"))
 	viper.BindPFlag("hf", rootCmd.Flags().Lookup("hf"))
 	viper.BindPFlag("ho", rootCmd.Flags().Lookup("ho"))
-
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -73,13 +76,13 @@ func output() {
 
 	var hasErrored bool
 	var devNum int
+	var values []float64 = make([]float64,0,0)
 	hid.UsbWalk(func(device hid.Device) {
 		info := device.Info()
 		id := fmt.Sprintf("%04x:%04x:%04x:%02x", info.Vendor, info.Product, info.Revision, info.Interface)
 		if id != hid_path {
 			return
 		}
-		devNum++
 
 		if err := device.Open(); err != nil {
 			log.Println("Open error: ", err)
@@ -98,11 +101,15 @@ func output() {
 		if buf, err := device.Read(16, 10*time.Second); err == nil {
 			tmp := bytesToValue(buf[2], buf[3], tf, to)
 			hum := bytesToValue(buf[4], buf[5], hf, ho)
+			devNum++
 			fmt.Printf("Device %d Temperature: %v, Humidity: %v\n", devNum, tmp, hum)
+			values = append(values, tmp)
 			if len(buf)>=14 {
 				tmp := bytesToValue(buf[10], buf[11], tf, to)
 				hum := bytesToValue(buf[12], buf[13], hf, ho)
-				fmt.Printf("Device %d Temperature2: %v, Humidity: %v\n", devNum, tmp, hum)
+				devNum++
+				fmt.Printf("Device %d Temperature: %v, Humidity: %v\n", devNum, tmp, hum)
+				values = append(values, tmp)
 			}
 		} else {
 			hasErrored = true
@@ -111,6 +118,16 @@ func output() {
 	})
 	if hasErrored {
 		os.Exit(1)
+	}
+	if posturl != "" && !hasErrored {
+		var s string
+		for i:=0; i<len(values); i++ {
+			s += fmt.Sprintf("%.2f", values[i])
+			if i<len(values)-1 { s += " " }
+		}
+		var postdata = url.Values{}
+		postdata.Set("values", s)
+		http.PostForm(posturl, postdata)
 	}
 }
 
