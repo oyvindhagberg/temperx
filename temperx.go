@@ -71,6 +71,7 @@ func output() {
 		fmt.Println("ho:", ho)
 	}
 
+	var hasErrored bool
 	var devNum int
 	hid.UsbWalk(func(device hid.Device) {
 		info := device.Info()
@@ -82,6 +83,7 @@ func output() {
 
 		if err := device.Open(); err != nil {
 			log.Println("Open error: ", err)
+			hasErrored = true
 			return
 		}
 
@@ -89,6 +91,7 @@ func output() {
 
 		if _, err := device.Write(cmd_raw, 10*time.Second); err != nil {
 			log.Println("Output report write failed:", err)
+			hasErrored = true
 			return
 		}
 
@@ -102,9 +105,13 @@ func output() {
 				fmt.Printf("Device %d Temperature2: %v, Humidity: %v\n", devNum, tmp, hum)
 			}
 		} else {
+			hasErrored = true
 			log.Println("Device read failed:", err)
 		}
 	})
+	if hasErrored {
+		os.Exit(1)
+	}
 }
 
 func bytesToValue(hibyte, lowbyte uint8, factor, offset float64) float64 {
