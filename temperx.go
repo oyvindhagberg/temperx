@@ -49,7 +49,7 @@ func main() {
 
 func output() {
 	if conf != "" {
-		if verbose == true {	
+		if verbose == true {
 			fmt.Println("Trying to read configuration from:", conf)
 		}
 		viper.SetConfigFile(conf)
@@ -71,12 +71,14 @@ func output() {
 		fmt.Println("ho:", ho)
 	}
 
+	var devNum int
 	hid.UsbWalk(func(device hid.Device) {
 		info := device.Info()
 		id := fmt.Sprintf("%04x:%04x:%04x:%02x", info.Vendor, info.Product, info.Revision, info.Interface)
 		if id != hid_path {
 			return
 		}
+		devNum++
 
 		if err := device.Open(); err != nil {
 			log.Println("Open error: ", err)
@@ -85,15 +87,27 @@ func output() {
 
 		defer device.Close()
 
-		if _, err := device.Write(cmd_raw, 1*time.Second); err != nil {
+		if _, err := device.Write(cmd_raw, 10*time.Second); err != nil {
 			log.Println("Output report write failed:", err)
 			return
 		}
 
-		if buf, err := device.Read(-1, 1*time.Second); err == nil {
-			tmp := (float64(buf[2])*256+float64(buf[3]))/100*tf + to
-			hum := (float64(buf[4])*256+float64(buf[5]))/100*hf + ho
-			fmt.Printf("Temperature: %v, Humidity: %v\n", tmp, hum)
+		if buf, err := device.Read(16, 10*time.Second); err == nil {
+			tmp := bytesToValue(buf[2], buf[3], tf, to)
+			hum := bytesToValue(buf[4], buf[5], hf, ho)
+			fmt.Printf("Device %d Temperature: %v, Humidity: %v\n", devNum, tmp, hum)
+			if len(buf)>=14 {
+				tmp := bytesToValue(buf[10], buf[11], tf, to)
+				hum := bytesToValue(buf[12], buf[13], hf, ho)
+				fmt.Printf("Device %d Temperature2: %v, Humidity: %v\n", devNum, tmp, hum)
+			}
+		} else {
+			log.Println("Device read failed:", err)
 		}
 	})
+}
+
+func bytesToValue(hibyte, lowbyte uint8, factor, offset float64) float64 {
+	var word = int16(hibyte)<<8 | int16(lowbyte)
+	return float64(word)/100*factor + offset
 }
